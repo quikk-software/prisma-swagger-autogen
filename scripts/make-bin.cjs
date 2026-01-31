@@ -1,10 +1,14 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
-const out = path.resolve(process.cwd(), 'dist/bin.cjs');
+const distDir = path.resolve(__dirname, "../dist");
+fs.mkdirSync(distDir, { recursive: true });
+
+const out = path.join(distDir, "bin.cjs");
 
 const content = `#!/usr/bin/env node
-require('./cli.cjs');
+require("./cli.cjs");
 `;
 
-fs.writeFileSync(out, content, 'utf8');
+fs.writeFileSync(out, content, "utf8");
+try { fs.chmodSync(out, 0o755); } catch {}
