@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { globSync } from 'glob';
-import { execSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 type OpenApiSchema =
     | {
@@ -194,7 +194,7 @@ function buildExampleFromSchema(schema: OpenApiSchema, components: Record<string
 
     if ((schema as any).$ref) {
         const name = String((schema as any).$ref).split('/').pop() || '';
-        const target = (components as any)[name] as OpenApiSchema | undefined;
+        const target = components[name];
         if (!target) return undefined;
         return buildExampleFromSchema(target, components, depth + 1);
     }
@@ -238,38 +238,32 @@ function attachExample(schema: OpenApiSchema, components: Record<string, OpenApi
     return s;
 }
 
-async function loadDmmfFromProject(): Promise<Dmmf> {
+function loadDmmfFromProject(): Dmmf {
     const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
     if (!fs.existsSync(schemaPath)) {
         throw new Error(`Prisma schema not found at: ${schemaPath}`);
     }
 
     const datamodel = fs.readFileSync(schemaPath, 'utf8');
+    const require = createRequire(import.meta.url);
 
-    let runtime: any;
-    try {
-        runtime = await import('@prisma/client/runtime');
-    } catch {
+    const tryLoad = (id: string) => {
         try {
-            runtime = await import('@prisma/client/runtime/library');
+            return require(id) as any;
         } catch {
-            throw new Error(
-                `Unable to import Prisma runtime. Please ensure @prisma/client is installed and generated.\nTried: '@prisma/client/runtime' and '@prisma/client/runtime/library'`,
-            );
+            return null;
         }
-    }
+    };
 
-    const getDMMF = runtime.getDMMF as ((args: { datamodel: string }) => Promise<any>) | undefined;
-    if (!getDMMF) {
+    const runtime = tryLoad('@prisma/client/runtime/library') ?? tryLoad('@prisma/client/runtime');
+    if (!runtime || typeof runtime.getDMMF !== 'function') {
         throw new Error(
-            `Prisma runtime does not expose getDMMF(). Your Prisma version may be incompatible.\nTry updating prisma + @prisma/client.`,
+            `Unable to load Prisma runtime getDMMF(). Ensure @prisma/client is installed in the target project.\nTried: @prisma/client/runtime/library and @prisma/client/runtime`,
         );
     }
 
-    const dmmf = (await getDMMF({ datamodel })) as Dmmf;
-    if (!dmmf?.datamodel?.models) {
-        throw new Error(`Failed to load Prisma DMMF. Prisma returned an unexpected structure.`);
-    }
+    const dmmf = runtime.getDMMF({ datamodel }) as Dmmf;
+    if (!dmmf?.datamodel?.models) throw new Error('Failed to load Prisma DMMF (unexpected structure).');
 
     return dmmf;
 }
@@ -425,7 +419,7 @@ swaggerAutogen('${ensurePosix(CONFIG.openapiOut)}', routes, docs)
 }
 
 export async function run(_args: string[]) {
-    const dmmf = await loadDmmfFromProject();
+    const dmmf = loadDmmfFromProject();
     const schemas = buildSchemasFromDmmf(dmmf);
     generateSwaggerConfigJs(schemas);
 }
