@@ -54,7 +54,7 @@ function getRequire() {
     return createRequire(base);
 }
 
-function loadDmmfFromProject(schemaPath?: string): Dmmf {
+async function loadDmmfFromProject(schemaPath?: string): Promise<Dmmf> {
     const resolvedSchemaPath = schemaPath
         ? path.resolve(process.cwd(), schemaPath)
         : path.resolve(process.cwd(), 'prisma/schema.prisma');
@@ -65,14 +65,19 @@ function loadDmmfFromProject(schemaPath?: string): Dmmf {
 
     const datamodel = fs.readFileSync(resolvedSchemaPath, 'utf8');
     const require = getRequire();
-
     const internals = require('@prisma/internals') as any;
 
     if (typeof internals.getDMMF !== 'function') {
         throw new Error(`@prisma/internals.getDMMF not available`);
     }
 
-    return internals.getDMMF({ datamodel }) as Dmmf;
+    const dmmf = (await internals.getDMMF({ datamodel })) as any;
+
+    if (!dmmf || !dmmf.datamodel || !Array.isArray(dmmf.datamodel.models) || !Array.isArray(dmmf.datamodel.enums)) {
+        throw new Error(`Unexpected DMMF shape returned by @prisma/internals.getDMMF`);
+    }
+
+    return dmmf as Dmmf;
 }
 
 function scalarToSchema(scalar: string): OpenApiSchema {
@@ -178,8 +183,8 @@ function listResponseSchema(itemRef: string): OpenApiSchema {
     };
 }
 
-function buildSchemasFromPrismaDmmf(schemaPath?: string) {
-    const dmmf = loadDmmfFromProject(schemaPath);
+async function buildSchemasFromPrismaDmmf(schemaPath?: string) {
+    const dmmf = await loadDmmfFromProject(schemaPath);
     const schemas: Record<string, OpenApiSchema> = {};
     const getRefName = (modelName: string) => `Get${modelName}Response`;
 
@@ -242,6 +247,6 @@ swaggerAutogen('${ensurePosix(CONFIG.openapiOut)}', routes, docs);`;
 export async function run(args: string[] = []) {
     const schemaFlagIndex = args.findIndex((a) => a === '--schema');
     const schemaPath = schemaFlagIndex >= 0 ? args[schemaFlagIndex + 1] : undefined;
-    const schemas = buildSchemasFromPrismaDmmf(schemaPath);
+    const schemas = await buildSchemasFromPrismaDmmf(schemaPath);
     generateSwaggerConfigJs(schemas);
 }
