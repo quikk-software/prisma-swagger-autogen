@@ -50,8 +50,7 @@ function pluralize(name: string) {
 }
 
 function getRequire() {
-    const base = typeof __filename !== 'undefined' ? __filename : (import.meta as any).url;
-    return createRequire(base);
+    return createRequire(typeof __filename !== 'undefined' ? __filename : process.cwd() + '/');
 }
 
 async function loadDmmfFromProject(schemaPath?: string): Promise<Dmmf> {
@@ -148,9 +147,7 @@ function stripWriteFields(model: any, getSchema: OpenApiSchema, omit: Set<string
     const relationFieldNames = new Set(model.fields.filter((f: any) => f.kind === 'object').map((f: any) => f.name));
 
     for (const key of Object.keys(schema.properties)) {
-        if (omit.has(key) || relationFieldNames.has(key)) {
-            delete schema.properties[key];
-        }
+        if (omit.has(key) || relationFieldNames.has(key)) delete schema.properties[key];
     }
 
     if (Array.isArray(schema.required)) {
