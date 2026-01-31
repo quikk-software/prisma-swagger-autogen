@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { globSync } from 'glob';
 import { createRequire } from 'node:module';
+import { globSync } from 'glob';
 
 type OpenApiSchema =
     | {
@@ -17,31 +17,11 @@ type OpenApiSchema =
 }
     | Record<string, any>;
 
-type DmmfField = {
-    name: string;
-    kind: 'scalar' | 'enum' | 'object';
-    type: string;
-    isRequired: boolean;
-    isList: boolean;
-};
-
-type DmmfModel = {
-    name: string;
-    fields: DmmfField[];
-};
-
-type DmmfEnum = {
-    name: string;
-    values: Array<{ name: string }>;
-};
-
-type DmmfDatamodel = {
-    models: DmmfModel[];
-    enums: DmmfEnum[];
-};
-
 type Dmmf = {
-    datamodel: DmmfDatamodel;
+    datamodel: {
+        models: any[];
+        enums: any[];
+    };
 };
 
 const CONFIG = {
@@ -69,6 +49,37 @@ function pluralize(name: string) {
     return `${name}s`;
 }
 
+function getRequire() {
+    const base = typeof __filename !== 'undefined' ? __filename : (import.meta as any).url;
+    return createRequire(base);
+}
+
+function loadDmmfFromProject(schemaPath?: string): Dmmf {
+    const resolvedSchemaPath = schemaPath
+        ? path.resolve(process.cwd(), schemaPath)
+        : path.resolve(process.cwd(), 'prisma/schema.prisma');
+
+    if (!fs.existsSync(resolvedSchemaPath)) {
+        throw new Error(`Prisma schema not found at ${resolvedSchemaPath}`);
+    }
+
+    const datamodel = fs.readFileSync(resolvedSchemaPath, 'utf8');
+    const require = getRequire();
+
+    let internals: any;
+    try {
+        internals = require('@prisma/internals');
+    } catch {
+        throw new Error(`Unable to load @prisma/internals`);
+    }
+
+    if (typeof internals.getDMMF !== 'function') {
+        throw new Error(`@prisma/internals.getDMMF not available`);
+    }
+
+    return internals.getDMMF({ datamodel }) as Dmmf;
+}
+
 function scalarToSchema(scalar: string): OpenApiSchema {
     switch (scalar) {
         case 'String':
@@ -94,7 +105,7 @@ function scalarToSchema(scalar: string): OpenApiSchema {
     }
 }
 
-function fieldSchema(field: DmmfField, getRefName: (model: string) => string): OpenApiSchema {
+function fieldSchema(field: any, getRefName: (model: string) => string): OpenApiSchema {
     if (field.kind === 'scalar') {
         const base = scalarToSchema(field.type);
         if (field.isList) return { type: 'array', items: base };
@@ -116,7 +127,7 @@ function fieldSchema(field: DmmfField, getRefName: (model: string) => string): O
     return { type: 'object' };
 }
 
-function modelToGetSchema(model: DmmfModel, getRefName: (model: string) => string): OpenApiSchema {
+function modelToGetSchema(model: any, getRefName: (model: string) => string): OpenApiSchema {
     const properties: Record<string, OpenApiSchema> = {};
     const required: string[] = [];
 
@@ -127,18 +138,19 @@ function modelToGetSchema(model: DmmfModel, getRefName: (model: string) => strin
 
     const schema: OpenApiSchema = { type: 'object', properties };
     if (required.length) schema.required = required;
-
     return schema;
 }
 
-function stripWriteFields(model: DmmfModel, getSchema: OpenApiSchema, omit: Set<string>): OpenApiSchema {
+function stripWriteFields(model: any, getSchema: OpenApiSchema, omit: Set<string>): OpenApiSchema {
     const schema = JSON.parse(JSON.stringify(getSchema)) as OpenApiSchema;
     if (!schema.properties) return schema;
 
-    const relationFieldNames = new Set(model.fields.filter((f) => f.kind === 'object').map((f) => f.name));
+    const relationFieldNames = new Set(model.fields.filter((f: any) => f.kind === 'object').map((f: any) => f.name));
 
     for (const key of Object.keys(schema.properties)) {
-        if (omit.has(key) || relationFieldNames.has(key)) delete schema.properties[key];
+        if (omit.has(key) || relationFieldNames.has(key)) {
+            delete schema.properties[key];
+        }
     }
 
     if (Array.isArray(schema.required)) {
@@ -159,121 +171,25 @@ function listResponseSchema(itemRef: string): OpenApiSchema {
     return {
         type: 'object',
         properties: {
-            count: { type: 'number', example: 3 },
-            hasPreviousPage: { type: 'boolean', example: false },
-            hasNextPage: { type: 'boolean', example: true },
-            pageNumber: { type: 'number', example: 1 },
-            pageSize: { type: 'number', example: 10 },
-            totalPages: { type: 'number', example: 1 },
+            count: { type: 'number' },
+            hasPreviousPage: { type: 'boolean' },
+            hasNextPage: { type: 'boolean' },
+            pageNumber: { type: 'number' },
+            pageSize: { type: 'number' },
+            totalPages: { type: 'number' },
             items: { type: 'array', items: { $ref: itemRef } },
         },
         required: ['count', 'hasPreviousPage', 'hasNextPage', 'pageNumber', 'pageSize', 'totalPages', 'items'],
     };
 }
 
-function exampleForScalarType(type: string, format?: string) {
-    if (type === 'string' && format === 'date-time') return new Date(0).toISOString();
-    switch (type) {
-        case 'string':
-            return 'string';
-        case 'integer':
-            return 0;
-        case 'number':
-            return 0;
-        case 'boolean':
-            return true;
-        case 'object':
-            return {};
-        default:
-            return null;
-    }
-}
-
-function buildExampleFromSchema(schema: OpenApiSchema, components: Record<string, OpenApiSchema>, depth = 0): any {
-    if (depth > 2) return undefined;
-
-    if ((schema as any).$ref) {
-        const name = String((schema as any).$ref).split('/').pop() || '';
-        const target = components[name];
-        if (!target) return undefined;
-        return buildExampleFromSchema(target, components, depth + 1);
-    }
-
-    if (Array.isArray((schema as any).allOf) && (schema as any).allOf.length) {
-        const merged: any = {};
-        for (const part of (schema as any).allOf as OpenApiSchema[]) {
-            const ex = buildExampleFromSchema(part, components, depth + 1);
-            if (ex && typeof ex === 'object' && !Array.isArray(ex)) Object.assign(merged, ex);
-        }
-        return Object.keys(merged).length ? merged : undefined;
-    }
-
-    if ((schema as any).type === 'array' && (schema as any).items) {
-        const item = buildExampleFromSchema((schema as any).items as OpenApiSchema, components, depth + 1);
-        return item === undefined ? [] : [item];
-    }
-
-    if ((schema as any).type === 'object' && (schema as any).properties) {
-        const obj: any = {};
-        for (const [k, v] of Object.entries((schema as any).properties as Record<string, OpenApiSchema>)) {
-            const ex = buildExampleFromSchema(v, components, depth + 1);
-            if (ex !== undefined) obj[k] = ex;
-        }
-        return obj;
-    }
-
-    if (Array.isArray((schema as any).enum) && (schema as any).enum.length) return (schema as any).enum[0];
-
-    if (typeof (schema as any).type === 'string') return exampleForScalarType((schema as any).type, (schema as any).format);
-
-    return undefined;
-}
-
-function attachExample(schema: OpenApiSchema, components: Record<string, OpenApiSchema>): OpenApiSchema {
-    const s = JSON.parse(JSON.stringify(schema)) as OpenApiSchema;
-    if ((s as any).example === undefined) {
-        const ex = buildExampleFromSchema(s, components);
-        if (ex !== undefined) (s as any).example = ex;
-    }
-    return s;
-}
-
-function loadDmmfFromProject(): Dmmf {
-    const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
-    if (!fs.existsSync(schemaPath)) {
-        throw new Error(`Prisma schema not found at: ${schemaPath}`);
-    }
-
-    const datamodel = fs.readFileSync(schemaPath, 'utf8');
-    const require = createRequire(import.meta.url);
-
-    const tryLoad = (id: string) => {
-        try {
-            return require(id) as any;
-        } catch {
-            return null;
-        }
-    };
-
-    const runtime = tryLoad('@prisma/client/runtime/library') ?? tryLoad('@prisma/client/runtime');
-    if (!runtime || typeof runtime.getDMMF !== 'function') {
-        throw new Error(
-            `Unable to load Prisma runtime getDMMF(). Ensure @prisma/client is installed in the target project.\nTried: @prisma/client/runtime/library and @prisma/client/runtime`,
-        );
-    }
-
-    const dmmf = runtime.getDMMF({ datamodel }) as Dmmf;
-    if (!dmmf?.datamodel?.models) throw new Error('Failed to load Prisma DMMF (unexpected structure).');
-
-    return dmmf;
-}
-
-function buildSchemasFromDmmf(dmmf: Dmmf) {
+function buildSchemasFromPrismaDmmf(schemaPath?: string) {
+    const dmmf = loadDmmfFromProject(schemaPath);
     const schemas: Record<string, OpenApiSchema> = {};
     const getRefName = (modelName: string) => `Get${modelName}Response`;
 
     for (const e of dmmf.datamodel.enums) {
-        schemas[e.name] = { type: 'string', enum: e.values.map((v) => v.name) };
+        schemas[e.name] = { type: 'string', enum: e.values.map((v: any) => v.name) };
     }
 
     for (const model of dmmf.datamodel.models) {
@@ -331,11 +247,6 @@ function buildSchemasFromDmmf(dmmf: Dmmf) {
         },
     };
 
-    for (const name of Object.keys(schemas)) {
-        if (name.startsWith('Post') && name.endsWith('Request')) schemas[name] = attachExample(schemas[name], schemas);
-        if (name.startsWith('Put') && name.endsWith('Request')) schemas[name] = attachExample(schemas[name], schemas);
-    }
-
     return schemas;
 }
 
@@ -365,61 +276,16 @@ function generateSwaggerConfigJs(schemas: Record<string, OpenApiSchema>) {
     };
 
     const fileContent = `const swaggerAutogen = require('swagger-autogen')();
-const fs = require('fs');
-const path = require('node:path');
-
-function isPlainObject(v){return v!==null && typeof v==='object' && !Array.isArray(v);}
-
-function normalizeSchema(schema){
-	if(!isPlainObject(schema)) return schema;
-	if(schema.$ref) return schema;
-
-	if(isPlainObject(schema.type) && typeof schema.type.example === 'string') schema.type = schema.type.example;
-	if(isPlainObject(schema.format) && typeof schema.format.example === 'string') schema.format = schema.format.example;
-	if(isPlainObject(schema.required) && Array.isArray(schema.required.example)) schema.required = schema.required.example;
-	if(isPlainObject(schema.enum) && Array.isArray(schema.enum.example)) schema.enum = schema.enum.example;
-
-	if(Array.isArray(schema.allOf)) schema.allOf = schema.allOf.map(normalizeSchema);
-	if(isPlainObject(schema.items)) schema.items = normalizeSchema(schema.items);
-	if(isPlainObject(schema.additionalProperties)) schema.additionalProperties = normalizeSchema(schema.additionalProperties);
-
-	if(isPlainObject(schema.properties)){
-		for(const k of Object.keys(schema.properties)){
-			schema.properties[k] = normalizeSchema(schema.properties[k]);
-		}
-	}
-
-	return schema;
-}
-
-function fixOpenApiFile(openapiPath){
-	const abs = path.resolve(process.cwd(), openapiPath);
-	if(!fs.existsSync(abs)) return;
-	const doc = JSON.parse(fs.readFileSync(abs,'utf8'));
-
-	if(doc && doc.components && isPlainObject(doc.components.schemas)){
-		for(const name of Object.keys(doc.components.schemas)){
-			doc.components.schemas[name] = normalizeSchema(doc.components.schemas[name]);
-		}
-	}
-
-	fs.writeFileSync(abs, JSON.stringify(doc,null,2),'utf8');
-}
-
 const docs = ${JSON.stringify(docs, null, 2)};
 const routes = ${JSON.stringify(routes, null, 2)};
+swaggerAutogen('${ensurePosix(CONFIG.openapiOut)}', routes, docs);`;
 
-swaggerAutogen('${ensurePosix(CONFIG.openapiOut)}', routes, docs)
-	.then(() => fixOpenApiFile('${ensurePosix(CONFIG.openapiOut)}'))
-	.catch((e) => { console.error(e); process.exitCode = 1; });
-`;
-
-    const outPath = path.resolve(CONFIG.projectRoot, CONFIG.outFile);
-    fs.writeFileSync(outPath, fileContent, 'utf8');
+    fs.writeFileSync(path.resolve(CONFIG.projectRoot, CONFIG.outFile), fileContent, 'utf8');
 }
 
-export async function run(_args: string[]) {
-    const dmmf = loadDmmfFromProject();
-    const schemas = buildSchemasFromDmmf(dmmf);
+export async function run(args: string[] = []) {
+    const schemaFlagIndex = args.findIndex((a) => a === '--schema');
+    const schemaPath = schemaFlagIndex >= 0 ? args[schemaFlagIndex + 1] : undefined;
+    const schemas = buildSchemasFromPrismaDmmf(schemaPath);
     generateSwaggerConfigJs(schemas);
 }
