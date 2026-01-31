@@ -1,6 +1,6 @@
 {
   "name": "prisma-swagger-autogen",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Generate swagger-autogen config + Prisma DMMF schemas and fix swagger-autogen output.",
   "license": "MIT",
   "author": "Joyce Marvin Rafflenbeul",
