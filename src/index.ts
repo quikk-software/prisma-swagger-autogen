@@ -66,12 +66,7 @@ function loadDmmfFromProject(schemaPath?: string): Dmmf {
     const datamodel = fs.readFileSync(resolvedSchemaPath, 'utf8');
     const require = getRequire();
 
-    let internals: any;
-    try {
-        internals = require('@prisma/internals');
-    } catch {
-        throw new Error(`Unable to load @prisma/internals`);
-    }
+    const internals = require('@prisma/internals') as any;
 
     if (typeof internals.getDMMF !== 'function') {
         throw new Error(`@prisma/internals.getDMMF not available`);
@@ -207,45 +202,6 @@ function buildSchemasFromPrismaDmmf(schemaPath?: string) {
         schemas[putName] = putSchema;
         schemas[listName] = listResponseSchema(`#/components/schemas/${getName}`);
     }
-
-    schemas['ExceptionResponse'] = {
-        type: 'object',
-        properties: {
-            detail: { type: 'string' },
-            errors: { type: 'array', items: { type: 'string' } },
-            status: { type: 'number' },
-            title: { type: 'string' },
-            type: { type: 'string' },
-        },
-        required: ['status', 'title', 'type'],
-    };
-
-    schemas['BadRequestResponse'] = {
-        allOf: [{ $ref: '#/components/schemas/ExceptionResponse' }],
-        example: {
-            status: 400,
-            title: 'The request was invalid',
-            type: 'https://tools.ietf.org/html/rfc7231#section-6.5.1',
-        },
-    };
-
-    schemas['NotFoundResponse'] = {
-        allOf: [{ $ref: '#/components/schemas/ExceptionResponse' }],
-        example: {
-            status: 404,
-            title: 'The specified resource was not found',
-            type: 'https://datatracker.ietf.org/doc/html/rfc7231#section-6.5.4',
-        },
-    };
-
-    schemas['InternalErrorResponse'] = {
-        allOf: [{ $ref: '#/components/schemas/ExceptionResponse' }],
-        example: {
-            status: 500,
-            title: 'An error occurred while processing your request',
-            type: 'https://tools.ietf.org/html/rfc7231#section-6.6.1',
-        },
-    };
 
     return schemas;
 }

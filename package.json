@@ -31,7 +31,7 @@
     }
   },
   "bin": {
-    "prisma-swagger-autogen": "./dist/cli.js"
+    "prisma-swagger-autogen": "./dist/cli.cjs"
   },
   "files": [
     "dist",
