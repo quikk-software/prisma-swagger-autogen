@@ -44,7 +44,6 @@
   },
   "peerDependencies": {
     "@prisma/client": ">=4",
-    "prisma": ">=4",
     "glob": ">=10",
     "swagger-autogen": ">=2"
   },

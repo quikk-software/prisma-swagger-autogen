@@ -244,22 +244,31 @@ async function loadDmmfFromProject(): Promise<Dmmf> {
         throw new Error(`Prisma schema not found at: ${schemaPath}`);
     }
 
-    const cmd = `npx prisma generate --schema "${schemaPath}" --print`;
-    const stdout = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const datamodel = fs.readFileSync(schemaPath, 'utf8');
 
-    const firstBrace = stdout.indexOf('{');
-    const lastBrace = stdout.lastIndexOf('}');
-    if (firstBrace === -1 || lastBrace === -1) {
-        throw new Error(`Failed to parse Prisma DMMF from: ${cmd}`);
+    let runtime: any;
+    try {
+        runtime = await import('@prisma/client/runtime');
+    } catch {
+        try {
+            runtime = await import('@prisma/client/runtime/library');
+        } catch {
+            throw new Error(
+                `Unable to import Prisma runtime. Please ensure @prisma/client is installed and generated.\nTried: '@prisma/client/runtime' and '@prisma/client/runtime/library'`,
+            );
+        }
     }
 
-    const jsonText = stdout.slice(firstBrace, lastBrace + 1);
-    const parsed = JSON.parse(jsonText);
+    const getDMMF = runtime.getDMMF as ((args: { datamodel: string }) => Promise<any>) | undefined;
+    if (!getDMMF) {
+        throw new Error(
+            `Prisma runtime does not expose getDMMF(). Your Prisma version may be incompatible.\nTry updating prisma + @prisma/client.`,
+        );
+    }
 
-    const dmmf = (parsed?.dmmf ?? parsed) as Dmmf;
-
+    const dmmf = (await getDMMF({ datamodel })) as Dmmf;
     if (!dmmf?.datamodel?.models) {
-        throw new Error(`Prisma DMMF not found in prisma output. Got keys: ${Object.keys(parsed || {})}`);
+        throw new Error(`Failed to load Prisma DMMF. Prisma returned an unexpected structure.`);
     }
 
     return dmmf;
