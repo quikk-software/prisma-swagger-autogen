@@ -31,7 +31,7 @@
     }
   },
   "bin": {
-    "prisma-swagger-autogen": "./dist/cli.cjs"
+    "prisma-swagger-autogen": "dist/cli.cjs"
   },
   "files": [
     "dist",
@@ -39,20 +39,20 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts src/cli.ts --format esm,cjs --dts --out-dir dist --tsconfig tsconfig.json",
+    "build": "tsup && chmod +x dist/cli.cjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@prisma/internals": "^6.0.0"
+    "@prisma/internals": "^6.0.0",
+    "glob": "^10.3.10"
   },
   "peerDependencies": {
     "@prisma/client": ">=4",
-    "glob": ">=10",
     "swagger-autogen": ">=2"
   },
   "devDependencies": {
     "@types/node": "^25.1.0",
-    "tsup": "^8.0.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.0.0"
   }
 }
