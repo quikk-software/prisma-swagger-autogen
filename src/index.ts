@@ -269,13 +269,13 @@ function fieldSchema(field: any, getRefName: (model: string) => string): OpenApi
     }
 
     if (field.kind === 'enum') {
-        const base: OpenApiSchema = { $ref: `#/components/schemas/${field.type}` };
+        const base: OpenApiSchema = { $ref: `#/components/@schemas/${field.type}` };
         if (field.isList) return { type: 'array', items: base };
         return base;
     }
 
     if (field.kind === 'object') {
-        const ref: OpenApiSchema = { $ref: `#/components/schemas/${getRefName(String(field.type))}` };
+        const ref: OpenApiSchema = { $ref: `#/components/@schemas/${getRefName(String(field.type))}` };
         if (field.isList) return { type: 'array', items: ref };
         return ref;
     }
@@ -359,7 +359,7 @@ async function buildSchemasFromPrismaDmmf(cfg: Config, schemaPath?: string) {
         schemas[getName] = getSchema;
         schemas[postName] = postSchema;
         schemas[putName] = putSchema;
-        schemas[listName] = listResponseSchema(`#/components/schemas/${getName}`);
+        schemas[listName] = listResponseSchema(`#/components/@schemas/${getName}`);
     }
 
     return schemas;
