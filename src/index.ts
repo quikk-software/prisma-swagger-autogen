@@ -372,7 +372,7 @@ function generateSwaggerConfigJs(cfg: Config, schemas: Record<string, OpenApiSch
         info: { title: cfg.serviceTitle },
         servers: [{ url: cfg.serverUrl }],
         components: {
-            schemas,
+            "@schemas": schemas,
             securitySchemes: {
                 [cfg.securitySchemeName]: {
                     type: 'oauth2',
