@@ -269,13 +269,13 @@ function fieldSchema(field: any, getRefName: (model: string) => string): OpenApi
     }
 
     if (field.kind === 'enum') {
-        const base: OpenApiSchema = { $ref: `#/components/@schemas/${field.type}` };
+        const base: OpenApiSchema = { $ref: `#/components/schemas/${field.type}` };
         if (field.isList) return { type: 'array', items: base };
         return base;
     }
 
     if (field.kind === 'object') {
-        const ref: OpenApiSchema = { $ref: `#/components/@schemas/${getRefName(String(field.type))}` };
+        const ref: OpenApiSchema = { $ref: `#/components/schemas/${getRefName(String(field.type))}` };
         if (field.isList) return { type: 'array', items: ref };
         return ref;
     }
@@ -359,7 +359,7 @@ async function buildSchemasFromPrismaDmmf(cfg: Config, schemaPath?: string) {
         schemas[getName] = getSchema;
         schemas[postName] = postSchema;
         schemas[putName] = putSchema;
-        schemas[listName] = listResponseSchema(`#/components/@schemas/${getName}`);
+        schemas[listName] = listResponseSchema(`#/components/schemas/${getName}`);
     }
 
     return schemas;
@@ -390,7 +390,7 @@ function generateSwaggerConfigJs(cfg: Config, schemas: Record<string, OpenApiSch
         security: [{ [cfg.securitySchemeName]: ['openid'] }],
     };
 
-    const fileContent = `const swaggerAutogen = require('swagger-autogen')();
+    const fileContent = `const swaggerAutogen = require('swagger-autogen')({ openapi: '3.0.1' });
 const docs = ${JSON.stringify(docs, null, 2)};
 const routes = ${JSON.stringify(routes, null, 2)};
 swaggerAutogen('${ensurePosix(cfg.openapiOut)}', routes, docs);`;
