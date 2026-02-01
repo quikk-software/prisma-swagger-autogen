@@ -24,20 +24,51 @@ type Dmmf = {
     };
 };
 
-const CONFIG = {
+type Config = {
+    projectRoot: string;
+    controllersGlob: string;
+    outFile: string;
+    openapiOut: string;
+    serviceTitle: string;
+    serverUrl: string;
+    securitySchemeName: string;
+    oauth: {
+        tokenUrl: string;
+        refreshUrl: string;
+        scopes: Record<string, string>;
+    };
+    omitFieldsInWriteDtos: Set<string>;
+};
+
+const DEFAULT_CONFIG: Config = {
     projectRoot: process.cwd(),
-    controllersGlob: './src/web/api/controllers/**/*.ts',
+    controllersGlob: './**/controllers/**/*.ts',
     outFile: './swagger.config.js',
-    openapiOut: './src/web/api/openapi.json',
-    serviceTitle: 'Prescription Service',
-    serverUrl: 'http://localhost:3008',
+    openapiOut: './**/openapi.json',
+    serviceTitle: 'Microservice Swagger Docs',
+    serverUrl: 'http://localhost:3000',
     securitySchemeName: 'keycloakOAuth',
     oauth: {
-        tokenUrl: 'http://auth.localhost/realms/haemo/protocol/openid-connect/token',
-        refreshUrl: 'http://auth.localhost/realms/haemo/protocol/openid-connect/refresh',
-        scopes: { openid: 'openid scope' as const },
+        tokenUrl: 'http://localhost:8080/realms/master/protocol/openid-connect/token',
+        refreshUrl: 'http://localhost:8080/realms/master/protocol/openid-connect/refresh',
+        scopes: { openid: 'openid' },
     },
     omitFieldsInWriteDtos: new Set(['id', 'createdAt', 'updatedAt', 'v']),
+};
+
+type ParsedArgs = {
+    schemaPath?: string;
+    projectRoot?: string;
+    controllersGlob?: string;
+    outFile?: string;
+    openapiOut?: string;
+    serviceTitle?: string;
+    serverUrl?: string;
+    securitySchemeName?: string;
+    oauthTokenUrl?: string;
+    oauthRefreshUrl?: string;
+    oauthScopes?: Record<string, string>;
+    omitFieldsInWriteDtos?: string[];
 };
 
 function ensurePosix(p: string) {
@@ -51,6 +82,132 @@ function pluralize(name: string) {
 
 function getRequire() {
     return createRequire(typeof __filename !== 'undefined' ? __filename : process.cwd() + '/');
+}
+
+function parseJsonObject(value: string, flagName: string): Record<string, any> {
+    try {
+        const parsed = JSON.parse(value);
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('must be a JSON object');
+        }
+        return parsed;
+    } catch (e: any) {
+        throw new Error(`Invalid JSON for ${flagName}: ${e?.message ?? String(e)}`);
+    }
+}
+
+function parseCsv(value: string): string[] {
+    return value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
+
+function readFlagValue(args: string[], flag: string): string | undefined {
+    const i = args.findIndex((a) => a === flag);
+    if (i < 0) return undefined;
+    const v = args[i + 1];
+    if (!v || v.startsWith('--')) return undefined;
+    return v;
+}
+
+function hasFlag(args: string[], flag: string): boolean {
+    return args.includes(flag);
+}
+
+function parseArgs(args: string[]): ParsedArgs {
+    if (hasFlag(args, '--help') || hasFlag(args, '-h')) {
+        const help = `
+prisma-swagger-autogen
+
+Usage:
+  prisma-swagger-autogen [options]
+
+Options:
+  --schema <path>                 Prisma schema path (default: ./prisma/schema.prisma)
+
+  --projectRoot <path>            Project root for resolving outFile/openapiOut (default: cwd)
+  --controllersGlob <glob>        Glob for controller files (default: ./**/controllers/**/*.ts)
+  --outFile <path>                Path to write swagger.config.js (default: ./swagger.config.js)
+  --openapiOut <path>             Path swagger-autogen writes OpenAPI JSON (default: ./openapi.json)
+
+  --serviceTitle <string>         OpenAPI title
+  --serverUrl <url>               OpenAPI server url
+  --securitySchemeName <string>   Security scheme name
+
+  --oauthTokenUrl <url>           OAuth2 tokenUrl
+  --oauthRefreshUrl <url>         OAuth2 refreshUrl
+  --oauthScopes <json>            OAuth2 scopes as JSON object, e.g. {"openid":"openid scope"}
+
+  --omitFields <csv>              Comma-separated fields to omit in write DTOs (default: id,createdAt,updatedAt,v)
+
+Examples:
+  prisma-swagger-autogen
+  prisma-swagger-autogen --schema ./prisma/schema.prisma
+  prisma-swagger-autogen --controllersGlob "./src/api/**/*.ts" --outFile ./swagger.config.js
+  prisma-swagger-autogen --oauthScopes '{"openid":"openid scope","profile":"profile"}'
+`.trim();
+        process.stdout.write(help + '\n');
+        process.exit(0);
+    }
+
+    const schemaPath = readFlagValue(args, '--schema');
+    const projectRoot = readFlagValue(args, '--projectRoot');
+    const controllersGlob = readFlagValue(args, '--controllersGlob');
+    const outFile = readFlagValue(args, '--outFile');
+    const openapiOut = readFlagValue(args, '--openapiOut');
+    const serviceTitle = readFlagValue(args, '--serviceTitle');
+    const serverUrl = readFlagValue(args, '--serverUrl');
+    const securitySchemeName = readFlagValue(args, '--securitySchemeName');
+    const oauthTokenUrl = readFlagValue(args, '--oauthTokenUrl');
+    const oauthRefreshUrl = readFlagValue(args, '--oauthRefreshUrl');
+    const oauthScopesRaw = readFlagValue(args, '--oauthScopes');
+    const omitFieldsRaw = readFlagValue(args, '--omitFields');
+
+    const oauthScopes = oauthScopesRaw ? parseJsonObject(oauthScopesRaw, '--oauthScopes') : undefined;
+    const omitFieldsInWriteDtos = omitFieldsRaw ? parseCsv(omitFieldsRaw) : undefined;
+
+    return {
+        schemaPath,
+        projectRoot,
+        controllersGlob,
+        outFile,
+        openapiOut,
+        serviceTitle,
+        serverUrl,
+        securitySchemeName,
+        oauthTokenUrl,
+        oauthRefreshUrl,
+        oauthScopes,
+        omitFieldsInWriteDtos,
+    };
+}
+
+function mergeConfig(base: Config, parsed: ParsedArgs): Config {
+    const cfg: Config = {
+        ...base,
+        projectRoot: parsed.projectRoot ? path.resolve(process.cwd(), parsed.projectRoot) : base.projectRoot,
+        controllersGlob: parsed.controllersGlob ?? base.controllersGlob,
+        outFile: parsed.outFile ?? base.outFile,
+        openapiOut: parsed.openapiOut ?? base.openapiOut,
+        serviceTitle: parsed.serviceTitle ?? base.serviceTitle,
+        serverUrl: parsed.serverUrl ?? base.serverUrl,
+        securitySchemeName: parsed.securitySchemeName ?? base.securitySchemeName,
+        oauth: {
+            tokenUrl: parsed.oauthTokenUrl ?? base.oauth.tokenUrl,
+            refreshUrl: parsed.oauthRefreshUrl ?? base.oauth.refreshUrl,
+            scopes: (parsed.oauthScopes ?? base.oauth.scopes) as Record<string, string>,
+        },
+        omitFieldsInWriteDtos: parsed.omitFieldsInWriteDtos
+            ? new Set(parsed.omitFieldsInWriteDtos)
+            : base.omitFieldsInWriteDtos,
+    };
+
+    cfg.controllersGlob = ensurePosix(cfg.controllersGlob);
+    cfg.outFile = ensurePosix(cfg.outFile);
+    cfg.openapiOut = ensurePosix(cfg.openapiOut);
+
+    return cfg;
 }
 
 async function loadDmmfFromProject(schemaPath?: string): Promise<Dmmf> {
@@ -180,7 +337,7 @@ function listResponseSchema(itemRef: string): OpenApiSchema {
     };
 }
 
-async function buildSchemasFromPrismaDmmf(schemaPath?: string) {
+async function buildSchemasFromPrismaDmmf(cfg: Config, schemaPath?: string) {
     const dmmf = await loadDmmfFromProject(schemaPath);
     const schemas: Record<string, OpenApiSchema> = {};
     const getRefName = (modelName: string) => `Get${modelName}Response`;
@@ -196,7 +353,7 @@ async function buildSchemasFromPrismaDmmf(schemaPath?: string) {
         const listName = `List${pluralize(model.name)}Response`;
 
         const getSchema = modelToGetSchema(model, getRefName);
-        const postSchema = stripWriteFields(model, getSchema, CONFIG.omitFieldsInWriteDtos);
+        const postSchema = stripWriteFields(model, getSchema, cfg.omitFieldsInWriteDtos);
         const putSchema = makeAllOptional(postSchema);
 
         schemas[getName] = getSchema;
@@ -208,42 +365,43 @@ async function buildSchemasFromPrismaDmmf(schemaPath?: string) {
     return schemas;
 }
 
-function generateSwaggerConfigJs(schemas: Record<string, OpenApiSchema>) {
-    const routes = globSync(CONFIG.controllersGlob, { nodir: true }).map((p) => ensurePosix(p));
+function generateSwaggerConfigJs(cfg: Config, schemas: Record<string, OpenApiSchema>) {
+    const routes = globSync(cfg.controllersGlob, { nodir: true }).map((p) => ensurePosix(p));
 
     const docs = {
-        info: { title: CONFIG.serviceTitle },
-        servers: [{ url: CONFIG.serverUrl }],
+        info: { title: cfg.serviceTitle },
+        servers: [{ url: cfg.serverUrl }],
         components: {
             schemas,
             securitySchemes: {
-                [CONFIG.securitySchemeName]: {
+                [cfg.securitySchemeName]: {
                     type: 'oauth2',
                     description: 'This API uses OAuth2 with the password flow.',
                     flows: {
                         password: {
-                            tokenUrl: CONFIG.oauth.tokenUrl,
-                            refreshUrl: CONFIG.oauth.refreshUrl,
-                            scopes: CONFIG.oauth.scopes,
+                            tokenUrl: cfg.oauth.tokenUrl,
+                            refreshUrl: cfg.oauth.refreshUrl,
+                            scopes: cfg.oauth.scopes,
                         },
                     },
                 },
             },
         },
-        security: [{ [CONFIG.securitySchemeName]: ['openid'] }],
+        security: [{ [cfg.securitySchemeName]: ['openid'] }],
     };
 
     const fileContent = `const swaggerAutogen = require('swagger-autogen')();
 const docs = ${JSON.stringify(docs, null, 2)};
 const routes = ${JSON.stringify(routes, null, 2)};
-swaggerAutogen('${ensurePosix(CONFIG.openapiOut)}', routes, docs);`;
+swaggerAutogen('${ensurePosix(cfg.openapiOut)}', routes, docs);`;
 
-    fs.writeFileSync(path.resolve(CONFIG.projectRoot, CONFIG.outFile), fileContent, 'utf8');
+    const outPath = path.resolve(cfg.projectRoot, cfg.outFile);
+    fs.writeFileSync(outPath, fileContent, 'utf8');
 }
 
 export async function run(args: string[] = []) {
-    const schemaFlagIndex = args.findIndex((a) => a === '--schema');
-    const schemaPath = schemaFlagIndex >= 0 ? args[schemaFlagIndex + 1] : undefined;
-    const schemas = await buildSchemasFromPrismaDmmf(schemaPath);
-    generateSwaggerConfigJs(schemas);
+    const parsed = parseArgs(args);
+    const cfg = mergeConfig(DEFAULT_CONFIG, parsed);
+    const schemas = await buildSchemasFromPrismaDmmf(cfg, parsed.schemaPath);
+    generateSwaggerConfigJs(cfg, schemas);
 }
